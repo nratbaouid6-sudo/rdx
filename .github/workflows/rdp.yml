@@ -1,0 +1,55 @@
+name: Tailscale Windows RDP
+
+on:
+  workflow_dispatch: # Allows you to trigger this manually from the Actions tab
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 360 # GitHub free tier allows up to 360 minutes (6 hours) per run
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Enable Remote Desktop (RDP)
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+
+      - name: Create RDP User Account
+        run: |
+          $Password = ConvertTo-SecureString "GitHubRDP2026!" -AsPlainText -Force
+          New-LocalUser "RdpUser" -Password $Password -Description "Tailscale RDP User"
+          Add-LocalGroupMember -Group "Administrators" -Member "RdpUser"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RdpUser"
+
+      - name: Download and Install Tailscale
+        run: |
+          Invoke-WebRequest -Uri "https://tailscale.com" -OutFile "tailscale-setup.exe"
+          Start-Process -FilePath ".\tailscale-setup.exe" -ArgumentList "/qn" -Wait
+          $env:Path += ";C:\Program Files\Tailscale"
+
+      - name: Connect to Tailscale Network
+        env:
+          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          & "C:\Program Files\Tailscale\tailscale.exe" up --authkey "$env:TAILSCALE_AUTH_KEY" --accept-routes
+
+      - name: Display Connection Details
+        run: |
+          Write-Host "========================================="
+          Write-Host "Tailscale IP Address to connect to:"
+          & "C:\Program Files\Tailscale\tailscale.exe" ip -4
+          Write-Host "Username: RdpUser"
+          Write-Host "Password: GitHubRDP2026!"
+          Write-Host "========================================="
+
+      - name: Keep Runner Alive
+        run: |
+          Write-Host "RDP Server is running. Pressing Ctrl+C in GitHub Actions will terminate it."
+          $loop = $true
+          while ($loop) {
+            Start-Sleep -Seconds 30
+          }
